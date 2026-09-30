@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>DigitalOcean Managed Database — Live Migration Tool</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🐘 Managed Database Live Migration Tool</h1>
+    <p>Plan a migration with AI, then actually run it into a DigitalOcean Managed Database.</p>
+    <p id="endpoint-badge">Loading endpoint info…</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Step 1 — Get an AI migration plan</h2>
+      <p class="hint">Uses DigitalOcean Serverless Inference's text-to-text endpoint (<code>/v1/chat/completions</code>).</p>
+
+      <label for="plan-source-engine">Source engine</label>
+      <select id="plan-source-engine">
+        <option value="MySQL">MySQL</option>
+        <option value="PostgreSQL" selected>PostgreSQL</option>
+        <option value="SQL Server">SQL Server</option>
+        <option value="Oracle">Oracle</option>
+        <option value="SQLite">SQLite</option>
+        <option value="MongoDB">MongoDB</option>
+        <option value="Redis">Redis</option>
+        <option value="Kafka">Kafka</option>
+      </select>
+
+      <label for="plan-schema">Source schema / data description</label>
+      <textarea id="plan-schema" rows="6" placeholder="Paste DDL, or describe the data">CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  customer_id INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL,
+  status VARCHAR(20) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- ~2.4M rows, self-hosted Postgres 14 on a VM.</textarea>
+
+      <label for="plan-target-engine">Target: DigitalOcean Managed Database engine</label>
+      <select id="plan-target-engine"><!-- populated from /api/target-engines --></select>
+
+      <div class="row row-3">
+        <div class="field"><label for="cluster-name">Cluster name (optional)</label><input id="cluster-name" type="text" placeholder="e.g. orders-prod" /></div>
+        <div class="field"><label for="region">Region (optional)</label><input id="region" type="text" placeholder="e.g. nyc3" /></div>
+        <div class="field"><label for="node-size">Node size (optional)</label><input id="node-size" type="text" placeholder="e.g. db-s-2vcpu-4gb" /></div>
+      </div>
+
+      <button id="plan-btn">Generate Migration Plan</button>
+      <div class="output" id="plan-output">Your migration plan, commands, and rollback notes will appear here.</div>
+      <div class="meta" id="plan-meta"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Step 2 — Run the actual migration</h2>
+      <p class="hint">
+        Connects for real to a source database and a DigitalOcean Managed Database, and copies schema + data.
+        Source and destination must be the <strong>same engine</strong> (PostgreSQL, MySQL, or MongoDB).
+        Credentials are only held in memory for this request — never logged or written to disk.
+      </p>
+
+      <div class="row row-2">
+        <div class="conn-box">
+          <h3>Source</h3>
+          <label for="src-engine">Engine</label>
+          <select id="src-engine">
+            <option value="postgresql">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+            <option value="mongodb">MongoDB</option>
+          </select>
+          <label for="src-host">Host</label>
+          <input id="src-host" type="text" placeholder="e.g. source-db.example.com" />
+          <div class="row row-2">
+            <div class="field"><label for="src-port">Port</label><input id="src-port" type="text" placeholder="5432" /></div>
+            <div class="field"><label for="src-ssl">TLS</label>
+              <select id="src-ssl"><option value="false">No</option><option value="true">Yes</option></select>
+            </div>
+          </div>
+          <label for="src-user">User</label>
+          <input id="src-user" type="text" placeholder="e.g. app_user" />
+          <label for="src-password">Password</label>
+          <input id="src-password" type="password" placeholder="••••••••" />
+          <label for="src-database">Database</label>
+          <input id="src-database" type="text" placeholder="e.g. app_production" />
+          <label for="src-uri">Connection URI (optional, overrides fields above)</label>
+          <input id="src-uri" type="text" placeholder="postgres://user:pass@host:5432/db?sslmode=require" />
+        </div>
+
+        <div class="conn-box">
+          <h3>Destination — DigitalOcean Managed Database</h3>
+          <label for="dst-engine">Engine</label>
+          <select id="dst-engine">
+            <option value="postgresql">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+            <option value="mongodb">MongoDB</option>
+          </select>
+          <label for="dst-host">Host</label>
+          <input id="dst-host" type="text" placeholder="e.g. db-postgresql-nyc3-xxxxx.b.db.ondigitalocean.com" />
+          <div class="row row-2">
+            <div class="field"><label for="dst-port">Port</label><input id="dst-port" type="text" placeholder="25060" /></div>
+            <div class="field"><label for="dst-ssl">TLS</label>
+              <select id="dst-ssl"><option value="true" selected>Yes (required)</option></select>
+            </div>
+          </div>
+          <label for="dst-user">User</label>
+          <input id="dst-user" type="text" placeholder="doadmin" />
+          <label for="dst-password">Password</label>
+          <input id="dst-password" type="password" placeholder="••••••••" />
+          <label for="dst-database">Database</label>
+          <input id="dst-database" type="text" placeholder="defaultdb" />
+          <label for="dst-uri">Connection URI (optional, overrides fields above)</label>
+          <input id="dst-uri" type="text" placeholder="postgresql://doadmin:pass@host:25060/defaultdb?sslmode=require" />
+        </div>
+      </div>
+
+      <button id="test-btn">Test Connections</button>
+      <div class="output" id="test-output">Test both connections to see available tables/collections.</div>
+
+      <div id="table-picker" hidden>
+        <h3>Select tables/collections to migrate</h3>
+        <div id="table-list"></div>
+        <button id="run-btn">Run Migration</button>
+      </div>
+
+      <div id="run-log" class="output log" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>Step 3 — Dump, Restore &amp; Rollback Plan</h2>
+      <p class="hint">
+        Generates the engine-native <code>pg_dump</code>/<code>pg_restore</code> commands (PostgreSQL) or
+        <code>mysqldump</code>/<code>mysql</code> commands (MySQL) — plus <code>mongodump</code>/<code>mongorestore</code>
+        for MongoDB — from the connection details entered above. Passwords are never embedded in the
+        generated commands; each one prompts for the password or reads it from an environment variable.
+      </p>
+
+      <label>Does the destination already contain data you'd need to preserve if you have to roll back?</label>
+      <div class="row row-2">
+        <label class="radio-label"><input type="radio" name="dest-state" value="empty" checked /> No — destination is empty / disposable</label>
+        <label class="radio-label"><input type="radio" name="dest-state" value="has-data" /> Yes — destination already has data</label>
+      </div>
+
+      <button id="dump-plan-btn">Generate Dump, Restore &amp; Rollback Steps</button>
+      <div class="output" id="dump-plan-output">Fill in the source and destination connection details above, then generate the plan.</div>
+    </section>
+  </main>
+
+  <footer>
+    AI plan calls <code>POST /v1/chat/completions</code> on DigitalOcean Serverless Inference
+    (<code>https://inference.do-ai.run/v1</code>). Live migration connects directly to the databases
+    you configure above using the <code>pg</code>, <code>mysql2</code>, or <code>mongodb</code> drivers —
+    it does not go through Serverless Inference. Always test against a non-production destination first,
+    and make sure this app is allowed under the destination cluster's Trusted Sources.
+  </footer>
+
+  <script src="/script.js"></script>
+</body>
+</html>
