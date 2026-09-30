@@ -16,7 +16,7 @@ import * as mysqlAdapter from "./adapters/mysql.js";
 import * as mongoAdapter from "./adapters/mongo.js";
 
 const MODEL_ACCESS_KEY = process.env.MODEL_ACCESS_KEY;
-const TEXT_MODEL = process.env.TEXT_MODEL || "llama3.3-70b-instruct";
+const TEXT_MODEL = process.env.TEXT_MODEL || "deepseek-4-flash";
 const PORT = process.env.PORT || 8080;
 const BASE_URL = "https://inference.do-ai.run/v1";
 
